@@ -16,13 +16,15 @@ public class Server {
 
 
         try {
+            svrFrame.InitIOSelector();
             svrFrame.InitSocket();
         } catch (IOException e) {
-            System.out.println("xxxxxxxxxxxxxxxxxxx Init SERVER SOCKET FAILED xxxxxxxxxxxxxxxxxxxxx");
+            System.out.println("xxxxxxxxxxxxxxxxxxx Init SERVER FAILED xxxxxxxxxxxxxxxxxxxxx");
         }
 
         svrFrame.start();
         System.out.println("xxxxxxxxxxxxxxxxxxx CHAT SERVER is running xxxxxxxxxxxxxxxxxxxxx");
+
 
     }
 }

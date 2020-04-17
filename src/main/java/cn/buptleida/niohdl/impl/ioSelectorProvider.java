@@ -26,7 +26,7 @@ public class ioSelectorProvider implements ioProvider {
     // 是否处于输出通道的注册过程
     private final AtomicBoolean inRegOutput = new AtomicBoolean(false);
 
-    private final HashMap<SelectionKey, IOCallback> IOCallbackMap = new HashMap<>();
+    private final HashMap<SelectionKey, Runnable> handlerMap = new HashMap<>();
 
     private final ExecutorService inputHandlePool;
     private final ExecutorService outputHandlePool;
@@ -68,10 +68,12 @@ public class ioSelectorProvider implements ioProvider {
                             if (key.isValid()) {
                                 // 取消继续对keyOps的监听
                                 key.interestOps(key.readyOps() & ~SelectionKey.OP_READ);
+
                                 //线程池执行read操作
-                                inputHandlePool.execute(new InputHandlerImpl(key));
+                                inputHandlePool.execute(handlerMap.get(key));
                             }
                         }
+                        System.out.println("收到消息");
 
                     }
 
@@ -94,7 +96,7 @@ public class ioSelectorProvider implements ioProvider {
             inputHandlePool.shutdown();
             outputHandlePool.shutdown();
 
-            IOCallbackMap.clear();
+            handlerMap.clear();
 
             readSelector.wakeup();
             writeSelector.wakeup();
@@ -102,20 +104,20 @@ public class ioSelectorProvider implements ioProvider {
         }
     }
     @Override
-    public boolean registerInput(SocketChannel channel, IOCallback ioCallback) {
+    public boolean registerInput(SocketChannel channel, InputHandler inputHandler) {
 
-        return register(channel, readSelector, inRegInput, ioCallback, IOCallbackMap, SelectionKey.OP_READ) != null;
+        return register(channel, readSelector, inRegInput, inputHandler, handlerMap, SelectionKey.OP_READ) != null;
     }
 
     @Override
-    public boolean registerOutput(SocketChannel channel, IOCallback ioCallback) {
+    public boolean registerOutput(SocketChannel channel, OutputHandler outputHandler) {
 
-        return register(channel, writeSelector, inRegOutput, ioCallback, IOCallbackMap, SelectionKey.OP_WRITE) != null;
+        return register(channel, writeSelector, inRegOutput, outputHandler, handlerMap, SelectionKey.OP_WRITE) != null;
     }
 
     @Override
     public void unRegisterInput(SocketChannel channel) {
-        unRegister(channel,readSelector,IOCallbackMap);
+        unRegister(channel,readSelector,handlerMap);
     }
 
     @Override
@@ -139,7 +141,7 @@ public class ioSelectorProvider implements ioProvider {
     }
 
     private static SelectionKey register(SocketChannel channel, Selector selector, AtomicBoolean locker,
-                                         IOCallback ioCallback, HashMap<SelectionKey, IOCallback> map,
+                                         Runnable ioCallback, HashMap<SelectionKey, Runnable> map,
                                          int ops) {
         //noinspection SynchronizationOnLocalVariableOrMethodParameter
         synchronized (locker) {
@@ -171,7 +173,7 @@ public class ioSelectorProvider implements ioProvider {
         }
     }
 
-    private static void unRegister(SocketChannel channel, Selector selector, HashMap<SelectionKey, IOCallback> map) {
+    private static void unRegister(SocketChannel channel, Selector selector, HashMap<SelectionKey, Runnable> map) {
         if (channel.isRegistered()) {
             SelectionKey key = channel.keyFor(selector);
             key.cancel();
@@ -180,41 +182,6 @@ public class ioSelectorProvider implements ioProvider {
         }
     }
 
-    /**
-     * 输入处理线程的实现类
-     */
-    final class InputHandlerImpl extends ioProvider.InputHandler {
-        private final SelectionKey key;
-
-        InputHandlerImpl(SelectionKey key) {
-            this.key = key;
-        }
-
-        @Override
-        protected void handle() {
-            ioArgs args = new ioArgs();
-
-            IOCallback callback = IOCallbackMap.get(key);
-            try {
-                if (args.read((SocketChannel) key.channel()) > 0) {
-                    //进行消息回调
-                    callback.onInput(args);
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-                //取消输入输出channel的注册
-                //回调close信号，关闭clientHandler
-                callback.onChannelClosed();
-            }
-        }
-    }
-
-    private OutputHandler outputHandler = new OutputHandler() {
-        @Override
-        protected void handle(Object args) {
-
-        }
-    };
 
     static class IoProviderThreadFactory implements ThreadFactory {
         private final ThreadGroup group;

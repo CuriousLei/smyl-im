@@ -1,6 +1,7 @@
 package cn.buptleida.clihdl;
 
 import cn.buptleida.niohdl.API;
+import cn.buptleida.niohdl.core.Connector;
 import cn.buptleida.niohdl.core.ioArgs;
 import cn.buptleida.niohdl.core.ioContext;
 import cn.buptleida.utils.CloseUtil;
@@ -16,7 +17,7 @@ import java.util.concurrent.Executors;
 import static java.nio.channels.SelectionKey.OP_READ;
 
 
-public class ClientHandler extends API {
+public class ClientHandler {
     private final SocketChannel socketChannel;
     private final ReadHandler readHandler;//阻塞IO模式的读取线程操作
     private final WriteHandle writeHandler;//阻塞IO模式的输出线程操作
@@ -26,11 +27,37 @@ public class ClientHandler extends API {
 
     public ClientHandler(SocketChannel socketChannel, ClientHandlerCallBack clientHandlerCallBack, String uid) throws IOException {
         this.socketChannel = socketChannel;
-        socketChannel.configureBlocking(false);
         this.readHandler = new ReadHandler(socketChannel.socket().getInputStream());
         this.writeHandler = new WriteHandle(socketChannel.socket().getOutputStream(), socketChannel);
-        //将channel注册进ReadSelector中
-        ioContext.getIoSelector().registerInput(socketChannel, this);
+
+
+        Connector connector = new Connector(){
+            /**
+             * 收到客户端消息，从niohdl里面回调，args里面包含buffer字节数组存储数据
+             */
+            @Override
+            protected void onReceiveFromCore(ioArgs args) {
+                super.onReceiveFromCore(args);
+                clientHandlerCallBack.NewMsgCallBack(ClientHandler.this, args);
+                ByteBuffer argsBuffer = args.getBuffer();
+                System.out.println(new String(argsBuffer.array(), 0, argsBuffer.position() - 1));
+                //回调完再次注册，读取下一条数据
+                //必须要这样
+                //ioContext.getIoSelector().registerInput(socketChannel, ClientHandler.this);
+            }
+
+            /**
+             * runnable处理里面异常退出的回调
+             */
+            @Override
+            public void onChannelClosed() {
+                super.onChannelClosed();
+                exitSelf();
+            }
+        };
+
+        connector.setup(socketChannel);
+
 
         //Selector writeSelector = Selector.open();
         //socketChannel.register(writeSelector, OP_READ);
@@ -85,26 +112,7 @@ public class ClientHandler extends API {
         clientHandlerCallBack.ExitNotify(this);
     }
 
-    /**
-     * 收到客户端消息，从niohdl里面回调，args里面包含buffer字节数组存储数据
-     */
-    @Override
-    protected void onReceiveFromCore(ioArgs args) {
-        super.onReceiveFromCore(args);
-        clientHandlerCallBack.NewMsgCallBack(this, args);
-        //回调完再次注册，读取下一条数据
-        //必须要这样
-        ioContext.getIoSelector().registerInput(socketChannel, this);
-    }
 
-    /**
-     * runnable处理里面异常退出的回调
-     */
-    @Override
-    public void onChannelClosed() {
-        super.onChannelClosed();
-        exitSelf();
-    }
 
     /**
      * 阻塞式IO

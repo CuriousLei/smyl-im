@@ -4,9 +4,9 @@ import java.nio.channels.SelectionKey;
 import java.nio.channels.SocketChannel;
 
 public interface ioProvider {
-    boolean registerInput(SocketChannel channel, IOCallback ioCallback);
+    boolean registerInput(SocketChannel channel, InputHandler inputHandler);
 
-    boolean registerOutput(SocketChannel channel, IOCallback ioCallback);
+    boolean registerOutput(SocketChannel channel, OutputHandler outputHandler);
 
     void unRegisterInput(SocketChannel channel);
 
@@ -24,6 +24,9 @@ public interface ioProvider {
 
     abstract class OutputHandler implements Runnable {
         Object args;
+        public final void setAttach(Object attach) {
+            this.args = attach;
+        }
 
         @Override
         public final void run() {

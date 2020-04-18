@@ -10,6 +10,7 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -61,7 +62,10 @@ public class ioSelectorProvider implements ioProvider {
                             waitSelection(inRegInput);
                             continue;
                         }
+
+
                         Iterator<SelectionKey> iterator = readSelector.selectedKeys().iterator();
+                        //System.out.println("selectedKeys数量："+readSelector.selectedKeys().size());
                         while (iterator.hasNext()) {
                             SelectionKey key = iterator.next();
                             iterator.remove();//此处格外重要
@@ -69,12 +73,11 @@ public class ioSelectorProvider implements ioProvider {
                                 // 取消继续对keyOps的监听
                                 key.interestOps(key.readyOps() & ~SelectionKey.OP_READ);
 
+
                                 //线程池执行read操作
                                 inputHandlePool.execute(handlerMap.get(key));
                             }
                         }
-                        System.out.println("收到消息");
-
                     }
 
                 } catch (IOException e) {
@@ -87,12 +90,39 @@ public class ioSelectorProvider implements ioProvider {
     }
 
     private void startWrite() {
+        Thread thread = new Thread("Clink IoSelectorProvider WriteSelector Thread") {
+            @Override
+            public void run() {
+                while (!isClosed.get()) {
+                    try {
+                        if (writeSelector.select() == 0) {
+                            waitSelection(inRegOutput);
+                            continue;
+                        }
 
+                        Set<SelectionKey> selectionKeys = writeSelector.selectedKeys();
+                        //System.out.println(selectionKeys.size()+"个通道就绪...");
+                        for (SelectionKey selectionKey : selectionKeys) {
+                            if (selectionKey.isValid()) {
+                                selectionKey.interestOps(selectionKey.readyOps() & ~SelectionKey.OP_WRITE);
+
+                                outputHandlePool.execute(handlerMap.get(selectionKey));
+                            }
+                        }
+                        selectionKeys.clear();
+                    } catch (IOException e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        };
+        thread.setPriority(Thread.MAX_PRIORITY);
+        thread.start();
     }
 
-    public void close(){
+    public void close() {
         //compareAndSet方法：当布尔值为expect，则将其换成update，成功返回true
-        if(isClosed.compareAndSet(false,true)){
+        if (isClosed.compareAndSet(false, true)) {
             inputHandlePool.shutdown();
             outputHandlePool.shutdown();
 
@@ -100,9 +130,10 @@ public class ioSelectorProvider implements ioProvider {
 
             readSelector.wakeup();
             writeSelector.wakeup();
-            CloseUtil.close(readSelector,writeSelector);
+            CloseUtil.close(readSelector, writeSelector);
         }
     }
+
     @Override
     public boolean registerInput(SocketChannel channel, InputHandler inputHandler) {
 
@@ -117,12 +148,12 @@ public class ioSelectorProvider implements ioProvider {
 
     @Override
     public void unRegisterInput(SocketChannel channel) {
-        unRegister(channel,readSelector,handlerMap);
+        unRegister(channel, readSelector, handlerMap);
     }
 
     @Override
     public void unRegisterOutput(SocketChannel channel) {
-
+        unRegister(channel, writeSelector, handlerMap);
     }
 
     private static void waitSelection(final AtomicBoolean locker) {
@@ -147,7 +178,7 @@ public class ioSelectorProvider implements ioProvider {
         synchronized (locker) {
             locker.set(true);
             try {
-                //这时候startRead中的select会立即返回，若是0，则进入waitSelection，然后进行locker.wait
+                //这时候select会立即返回，若是0，则进入waitSelection，然后进行locker.wait
                 selector.wakeup();
 
                 SelectionKey key = null;
@@ -156,7 +187,9 @@ public class ioSelectorProvider implements ioProvider {
                     if (key != null) {
                         key.interestOps(key.readyOps() | ops);
                     }
-                } else {
+                }
+                //（注册write）如果已注册过read，还没注册write，此时key为null
+                if (key == null) {
                     key = channel.register(selector, ops);
                     map.put(key, ioCallback);
                 }
@@ -165,7 +198,7 @@ public class ioSelectorProvider implements ioProvider {
                 e.printStackTrace();
                 return null;
             } finally {
-                System.out.println("注册成功！");
+                //System.out.println("注册成功！");
                 locker.set(false);
                 //唤醒locker.wait()
                 locker.notify();

@@ -17,55 +17,17 @@ import java.util.concurrent.Executors;
 import static java.nio.channels.SelectionKey.OP_READ;
 
 
-public class ClientHandler {
-    private final SocketChannel socketChannel;
-    private final ReadHandler readHandler;//阻塞IO模式的读取线程操作
-    private final WriteHandle writeHandler;//阻塞IO模式的输出线程操作
+public class ClientHandler extends Connector {
+
     //private final Removable removable;
     private final String uid;
     private final ClientHandlerCallBack clientHandlerCallBack;
 
     public ClientHandler(SocketChannel socketChannel, ClientHandlerCallBack clientHandlerCallBack, String uid) throws IOException {
-        this.socketChannel = socketChannel;
-        this.readHandler = new ReadHandler(socketChannel.socket().getInputStream());
-        this.writeHandler = new WriteHandle(socketChannel.socket().getOutputStream(), socketChannel);
-
-
-        Connector connector = new Connector(){
-            /**
-             * 收到客户端消息，从niohdl里面回调，args里面包含buffer字节数组存储数据
-             */
-            @Override
-            protected void onReceiveFromCore(ioArgs args) {
-                super.onReceiveFromCore(args);
-                clientHandlerCallBack.NewMsgCallBack(ClientHandler.this, args);
-                ByteBuffer argsBuffer = args.getBuffer();
-                System.out.println(new String(argsBuffer.array(), 0, argsBuffer.position() - 1));
-                //回调完再次注册，读取下一条数据
-                //必须要这样
-                //ioContext.getIoSelector().registerInput(socketChannel, ClientHandler.this);
-            }
-
-            /**
-             * runnable处理里面异常退出的回调
-             */
-            @Override
-            public void onChannelClosed() {
-                super.onChannelClosed();
-                exitSelf();
-            }
-        };
-
-        connector.setup(socketChannel);
-
-
-        //Selector writeSelector = Selector.open();
-        //socketChannel.register(writeSelector, OP_READ);
-        this.clientHandlerCallBack = clientHandlerCallBack;
         this.uid = uid;
+        this.clientHandlerCallBack = clientHandlerCallBack;
+        setup(socketChannel);
 
-        //开始BIO模式的读取线程
-        //read();
     }
 
     public interface ClientHandlerCallBack {
@@ -73,34 +35,43 @@ public class ClientHandler {
         //用户退出的回调
         void ExitNotify(ClientHandler clientHandler);
 
-        //用户传来新消息的回调,BIO模式
         void NewMsgCallBack(ClientHandler clientHandler, String msg);
 
         //用户传来新消息的回调,NIO模式
-        void NewMsgCallBack(ClientHandler clientHandler, ioArgs args);
+        //void NewMsgCallBack(ClientHandler clientHandler, ioArgs args);
+    }
+    /**
+     * 收到客户端消息，从niohdl里面回调，args里面包含buffer字节数组存储数据
+     */
+    @Override
+    protected void onReceiveFromCore(String msg) {
+        super.onReceiveFromCore(msg);
+        clientHandlerCallBack.NewMsgCallBack(ClientHandler.this, msg);
+
+        //回调完再次注册，读取下一条数据
+        //必须要这样
+        //ioContext.getIoSelector().registerInput(socketChannel, ClientHandler.this);
+    }
+    /**
+     * runnable处理里面异常退出的回调
+     */
+    @Override
+    public void onChannelClosed(SocketChannel channel) {
+        super.onChannelClosed(channel);
+        exitSelf();
     }
 
-    public void read() {
-        readHandler.start();
-    }
 
     public void write(String msg) {
-
-        writeHandler.write(msg);
+        System.out.println(msg);
+        send(msg);
     }
 
-    public void write(ioArgs args) {
-        //System.out.println(msg);
-        writeHandler.write(args);
-    }
 
-    /**
-     * 把输入输出流和套接字都关闭
-     */
-    public void socketClose() {
-        readHandler.exit();
-        writeHandler.exit();
-        CloseUtil.close(socketChannel);
+    @Override
+    public void close() throws IOException {
+        super.close();
+        exitSelf();
     }
 
     /**
@@ -108,10 +79,14 @@ public class ClientHandler {
      * 关闭套接字通道，把自身从对象列表中清除掉
      */
     private void exitSelf() {
-        socketClose();
+        exit();
         clientHandlerCallBack.ExitNotify(this);
     }
 
+    public void exit() {
+        CloseUtil.close(this);
+        System.out.println("客户端已退出");
+    }
 
 
     /**

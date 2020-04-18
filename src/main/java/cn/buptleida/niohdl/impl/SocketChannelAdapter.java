@@ -21,6 +21,8 @@ public class SocketChannelAdapter implements Sender, Receiver, Cloneable {
     private ioArgs.IoArgsEventListener receiveIoEventListener;//2个都是指向Connector中的echoReceiveListener对象，可借此向Connector回调消息
     private ioArgs.IoArgsEventListener sendIoEventListener;
 
+    private ioArgs receiveArgsTemp;
+
     public SocketChannelAdapter(SocketChannel channel, ioProvider provider,
                                 OnChannelStatusChangedListener listener) throws IOException {
         this.channel = channel;
@@ -32,13 +34,16 @@ public class SocketChannelAdapter implements Sender, Receiver, Cloneable {
 
 
     @Override
-    public boolean receiveAsync(ioArgs.IoArgsEventListener listener) throws IOException {
+    public void setReceiveListener(ioArgs.IoArgsEventListener listener) {
+        receiveIoEventListener = listener;
+    }
+
+    @Override
+    public boolean receiveAsync(ioArgs args) throws IOException {
         if (isClosed.get()) {
             throw new IOException("Current channel is closed!");
         }
-
-        receiveIoEventListener = listener;
-
+        receiveArgsTemp = args;
         return provider.registerInput(channel, inputHandler);
     }
 
@@ -49,7 +54,7 @@ public class SocketChannelAdapter implements Sender, Receiver, Cloneable {
         }
 
         sendIoEventListener = listener;
-        // 当前发送的数据附加到回调中
+
         outputHandler.setAttach(args);
         return provider.registerOutput(channel, outputHandler);
     }
@@ -74,18 +79,16 @@ public class SocketChannelAdapter implements Sender, Receiver, Cloneable {
                 return;
             }
 
-            ioArgs args = new ioArgs();
-            ioArgs.IoArgsEventListener listener = SocketChannelAdapter.this.receiveIoEventListener;
+            ioArgs args = receiveArgsTemp;
+            ioArgs.IoArgsEventListener listener = receiveIoEventListener;
 
-            System.out.println("test");
-            if (listener != null) {
-                //开始处理，向Connector中的echoReceiveListener回调消息
-                listener.onStarted(args);
-            }
+
+            //开始处理，向Connector中的echoReceiveListener回调消息
+            listener.onStarted(args);
 
             try {
                 // 具体的读取操作
-                if (args.read(channel) > 0 && listener != null) {
+                if (args.readFrom(channel) > 0 ) {
                     // 读取完成回调
                     listener.onCompleted(args);
                 } else {
@@ -106,8 +109,24 @@ public class SocketChannelAdapter implements Sender, Receiver, Cloneable {
             if (isClosed.get()) {
                 return;
             }
+            ioArgs args = getAttach();
+            ioArgs.IoArgsEventListener listener = sendIoEventListener;
 
-            sendIoEventListener.onCompleted(null);
+
+            //开始处理，向Connector中的echoReceiveListener回调消息
+            listener.onStarted(args);
+
+            try {
+                // 具体的写操作
+                if (args.writeTo(channel) > 0) {
+                    // 写操作完成回调
+                    listener.onCompleted(args);
+                } else {
+                    throw new IOException("Cannot write any data!");
+                }
+            } catch (IOException ignored) {
+                CloseUtil.close(SocketChannelAdapter.this);
+            }
         }
     };
 

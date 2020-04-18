@@ -18,7 +18,7 @@ public class StringReceivePacket extends ReceivePacket {
         position+=count;
     }
 
-    public String string(){
+    public String toString(){
         return new String(buffer);
     }
 }

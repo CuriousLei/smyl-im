@@ -85,7 +85,7 @@ class SvrFrame implements ClientHandler.ClientHandlerCallBack {
 
     void stop() throws IOException {
         for (ClientHandler client : clientHandlerList) {
-            client.socketClose();
+            client.exit();
         }
         clientHandlerList.clear();
         clientListenHandler.exit();
@@ -128,21 +128,21 @@ class SvrFrame implements ClientHandler.ClientHandlerCallBack {
             }
         });
     }
-    @Override
-    public void NewMsgCallBack(ClientHandler srcClient, ioArgs args) {
-        routeThreadExecutor.execute(() -> {
-            synchronized (SvrFrame.this) {
-                args.setSrcUid(srcClient.getUid());
-                //将用户发来的消息转发给其它用户
-                for (ClientHandler destClient : clientHandlerList) {
-                    if (srcClient == destClient) {
-                        continue;
-                    }
-                    destClient.write(args);
-                }
-            }
-        });
-    }
+    // @Override
+    // public void NewMsgCallBack(ClientHandler srcClient, ioArgs args) {
+    //     routeThreadExecutor.execute(() -> {
+    //         synchronized (SvrFrame.this) {
+    //             args.setSrcUid(srcClient.getUid());
+    //             //将用户发来的消息转发给其它用户
+    //             for (ClientHandler destClient : clientHandlerList) {
+    //                 if (srcClient == destClient) {
+    //                     continue;
+    //                 }
+    //                 destClient.write(args);
+    //             }
+    //         }
+    //     });
+    // }
 
     /**
      * 监听客户端连接请求的线程

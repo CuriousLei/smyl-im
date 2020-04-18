@@ -1,6 +1,10 @@
 package cn.buptleida.niohdl.core;
 
+import cn.buptleida.niohdl.box.StringReceivePacket;
+import cn.buptleida.niohdl.box.StringSendPacket;
 import cn.buptleida.niohdl.impl.SocketChannelAdapter;
+import cn.buptleida.niohdl.impl.async.AsyncReceiveDispatcher;
+import cn.buptleida.niohdl.impl.async.AsyncSendDispatcher;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -12,52 +16,44 @@ public class Connector implements Closeable, SocketChannelAdapter.OnChannelStatu
     private SocketChannel channel;
     private Sender sender;//这两个都引用适配器
     private Receiver receiver;
-    private ioArgs.IoArgsEventListener echoReceiveListener = new ioArgs.IoArgsEventListener() {
-        @Override
-        public void onStarted(ioArgs args) {
+    private SendDispatcher sendDispatcher;
+    private ReceiveDispatcher receiveDispatcher;
 
-        }
-
-        @Override
-        public void onCompleted(ioArgs args) {
-            onReceiveFromCore(args);
-            readNextMessage();
-        }
-    };
-
-    public void setup(SocketChannel channel) throws IOException {
+    protected void setup(SocketChannel channel) throws IOException {
 
         this.channel = channel;
         SocketChannelAdapter adapter = new SocketChannelAdapter(channel, ioContext.getIoSelector(), this);
         sender = adapter;
         receiver = adapter;
 
-        readNextMessage();
+        sendDispatcher = new AsyncSendDispatcher(sender);
+        receiveDispatcher = new AsyncReceiveDispatcher(receiver,receivePacketCallback);
+
+        receiveDispatcher.start();
+
     }
 
-    private void readNextMessage() {
-
-        if(receiver!=null){
-            try {
-                //将回调方法传给适配器，并执行注册
-                receiver.receiveAsync(echoReceiveListener);
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-        }
+    public void send(String msg){
+        //System.out.println("发送:"+msg);
+        SendPacket packet = new StringSendPacket(msg);
+        sendDispatcher.send(packet);
     }
 
-    //这两个方法给ClientHandler中的匿名子类继承重写
-    protected void onReceiveFromCore(ioArgs args) {
+
+    protected void onReceiveFromCore(String msg) {
+        System.out.println(msg);
     }
 
-    protected void onChannelClosed() {
-    }
 
 
     //实现Closeable方法
     @Override
     public void close() throws IOException {
+        sendDispatcher.close();
+        receiveDispatcher.close();
+        sender.close();
+        receiver.close();
+        channel.close();
 
     }
 
@@ -66,4 +62,16 @@ public class Connector implements Closeable, SocketChannelAdapter.OnChannelStatu
     public void onChannelClosed(SocketChannel channel) {
 
     }
+
+    //接收AsyncReceiveDispatcher中的回调
+    private ReceiveDispatcher.ReceivePacketCallback receivePacketCallback = new ReceiveDispatcher.ReceivePacketCallback() {
+        //接收到消息的回调
+        @Override
+        public void onReceivePacketCompleted(ReceivePacket packet) {
+            if(packet instanceof StringReceivePacket){
+                String msg = packet.toString();
+                onReceiveFromCore(msg);
+            }
+        }
+    };
 }

@@ -23,17 +23,21 @@ public interface ioProvider {
     }
 
     abstract class OutputHandler implements Runnable {
-        Object args;
+        Object attach;
         public final void setAttach(Object attach) {
-            this.args = attach;
+            this.attach = attach;
+        }
+
+        public final <T> T getAttach() {
+            return (T) this.attach;
         }
 
         @Override
         public final void run() {
-            handle(args);
+            handle(attach);
         }
 
-        protected abstract void handle(Object args);
+        protected abstract void handle(Object attach);
     }
 
     interface IOCallback {

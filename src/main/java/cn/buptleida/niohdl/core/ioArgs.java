@@ -21,6 +21,13 @@ public class ioArgs {
     }
 
     /**
+     * 获取容量
+     * @return
+     */
+    public int capacity(){
+        return buffer.capacity();
+    }
+    /**
      * 从bytes中读到buffer
      *
      * @param bytes
@@ -68,6 +75,7 @@ public class ioArgs {
         startWriting();
 
         int byteProduced = 0;
+        //hasRemaining就是position<limit返回true
         while (buffer.hasRemaining()) {
             int len = channel.read(buffer);
             if (len < 0) {
@@ -75,9 +83,11 @@ public class ioArgs {
             }
             byteProduced += len;
         }
+        //System.out.println("position="+buffer.position());
 
         finishWriting();
 
+        //System.out.println("收到长度："+byteProduced);
         return byteProduced;
     }
 
@@ -93,6 +103,7 @@ public class ioArgs {
         int byteProduced = 0;
         while (buffer.hasRemaining()) {
             int len = channel.write(buffer);
+            //System.out.println("发送长度"+len);
             if (len < 0) {
                 throw new EOFException();
             }

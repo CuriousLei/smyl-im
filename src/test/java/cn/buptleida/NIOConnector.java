@@ -1,9 +1,9 @@
-package cn.buptleida.client;
+package cn.buptleida;
 
 
 import cn.buptleida.niohdl.core.Connector;
 
-import java.io.*;
+import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.channels.SocketChannel;

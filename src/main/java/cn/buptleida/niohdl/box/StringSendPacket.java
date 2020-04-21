@@ -1,10 +1,10 @@
 package cn.buptleida.niohdl.box;
 
-import cn.buptleida.niohdl.core.ReceivePacket;
 import cn.buptleida.niohdl.core.SendPacket;
 
-public class StringSendPacket extends SendPacket {
+import java.io.ByteArrayInputStream;
 
+public class StringSendPacket extends SendPacket<ByteArrayInputStream> {
     private final byte[] bytes;
 
     public StringSendPacket(String msg) {
@@ -13,7 +13,7 @@ public class StringSendPacket extends SendPacket {
     }
 
     @Override
-    public byte[] bytes() {
-        return bytes;
+    protected ByteArrayInputStream createStream() {
+        return new ByteArrayInputStream(bytes);
     }
 }

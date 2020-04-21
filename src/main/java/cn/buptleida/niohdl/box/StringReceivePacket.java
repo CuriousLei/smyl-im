@@ -2,23 +2,29 @@ package cn.buptleida.niohdl.box;
 
 import cn.buptleida.niohdl.core.ReceivePacket;
 
-public class StringReceivePacket extends ReceivePacket {
-    private byte[] buffer;
-    private int position;
+import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
+import java.io.IOException;
+
+public class StringReceivePacket extends ReceivePacket<ByteArrayOutputStream> {
+    private String string;
 
     public StringReceivePacket(int len) {
-        this.buffer = new byte[len];
         length = len;
     }
 
-    @Override
-    public void save(byte[] bytes, int count) {
-        //position是目标数组的起始长度，count是源数组的要copy的长度
-        System.arraycopy(bytes,0,buffer,position,count);
-        position+=count;
+    public String toString(){
+        return string;
     }
 
-    public String toString(){
-        return new String(buffer);
+    @Override
+    protected void closeStream(ByteArrayOutputStream stream) throws IOException {
+        super.closeStream(stream);
+        string = new String(stream.toByteArray());
+    }
+
+    @Override
+    protected ByteArrayOutputStream createStream() {
+        return new ByteArrayOutputStream((int)length);
     }
 }

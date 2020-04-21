@@ -2,28 +2,37 @@ package cn.buptleida.niohdl.impl.async;
 
 import cn.buptleida.niohdl.core.*;
 import cn.buptleida.utils.CloseUtil;
-import com.sun.corba.se.impl.protocol.giopmsgheaders.IORAddressingInfo;
 
 import java.io.IOException;
+import java.nio.channels.Channels;
+import java.nio.channels.ReadableByteChannel;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class AsyncSendDispatcher implements SendDispatcher {
+public class AsyncSendDispatcher implements SendDispatcher, ioArgs.IoArgsEventProcessor {
     private final AtomicBoolean isClosed = new AtomicBoolean(false);
     private Sender sender;
     private Queue<SendPacket> queue = new ConcurrentLinkedDeque<>();
     private AtomicBoolean isSending = new AtomicBoolean();
     private ioArgs ioArgs = new ioArgs();
-    private SendPacket packetTemp;
+    private SendPacket<?> packetTemp;
     //当前发送的packet大小以及进度
-    private int total;
-    private int position;
+    private long total;
+    private long position;
+
+    private ReadableByteChannel channel;
 
     public AsyncSendDispatcher(Sender sender) {
         this.sender = sender;
+        sender.setSendListener(this);
     }
 
+    /**
+     * connector将数据封装进packet后，调用这个方法
+     *
+     * @param packet
+     */
     @Override
     public void send(SendPacket packet) {
         queue.offer(packet);//将数据放进队列中
@@ -31,7 +40,6 @@ public class AsyncSendDispatcher implements SendDispatcher {
             sendNextPacket();
         }
     }
-
 
     @Override
     public void cancel(SendPacket packet) {
@@ -57,7 +65,6 @@ public class AsyncSendDispatcher implements SendDispatcher {
         if (temp != null) {
             CloseUtil.close(temp);
         }
-        //System.out.println("sendNextPacket");
         SendPacket packet = packetTemp = takePacket();
         if (packet == null) {
             //队列为空，取消发送状态
@@ -72,35 +79,38 @@ public class AsyncSendDispatcher implements SendDispatcher {
     }
 
     private void sendCurrentPacket() {
-        ioArgs args = ioArgs;
-
-        args.startWriting();
 
         if (position >= total) {
+            completePacket(position == total);
             sendNextPacket();
             return;
-        } else if (position == 0) {
-            //首包，需要携带长度信息
-            args.writeLength(total);
         }
 
-        byte[] bytes = packetTemp.bytes();
-        //System.out.println("把bytes的数据写入到IoArgs中");
-        //把bytes的数据写入到IoArgs中
-        int count = args.readFrom(bytes, position);
-        position += count;
-
-        //完成封装
-        args.finishWriting();
-        //进行消息发送
-
-        System.out.println("进行消息发送"+position);
         try {
-            sender.sendAsync(args, ioArgsEventListener);
+            //发送当前包
+            sender.postSendAsync();
         } catch (IOException e) {
-            closeAndNotify();
+            e.printStackTrace();
         }
 
+
+    }
+
+    /**
+     * 一个packet发送完毕
+     *
+     * @param isSucceed
+     */
+    private void completePacket(boolean isSucceed) {
+        SendPacket packet = this.packetTemp;
+        if (packet == null) {
+            return;
+        }
+        CloseUtil.close(packet, channel);
+        packetTemp = null;
+        channel = null;
+        total = 0;
+        position = 0;
     }
 
     private void closeAndNotify() {
@@ -108,29 +118,88 @@ public class AsyncSendDispatcher implements SendDispatcher {
     }
 
     @Override
-    public void close() throws IOException {
+    public void close() {
         if (isClosed.compareAndSet(false, true)) {
             isSending.set(false);
-            SendPacket packet = packetTemp;
-            if (packet != null) {
-                packetTemp = null;
-                CloseUtil.close(packet);
-            }
+            //异常导致的完成操作
+            completePacket(false);
         }
     }
 
-    private ioArgs.IoArgsEventListener ioArgsEventListener = new ioArgs.IoArgsEventListener() {
-        @Override
-        public void onStarted(ioArgs args) {
+    /**
+     * 接收回调,来自writeHandler输出线程
+     */
+    // private ioArgs.IoArgsEventListener ioArgsEventListener = new ioArgs.IoArgsEventListener() {
+    //     @Override
+    //     public void onStarted(ioArgs args) {
+    //
+    //     }
+    //
+    //     @Override
+    //     public void onCompleted(ioArgs args) {
+    //         //继续发送当前包packetTemp，因为可能一个包没发完
+    //         sendCurrentPacket();
+    //     }
+    // };
 
+
+    /**
+     * 将数据写入ioArgs
+     *
+     * @return
+     */
+    @Override
+    public ioArgs providerIoArgs() {
+        ioArgs args = ioArgs;
+        if (channel == null) {
+            //首包
+            //将数据装入channel，open()返回inputStream类型
+            channel = Channels.newChannel(packetTemp.open());
+            args.setLimit(4);
+            args.writeLength((int) packetTemp.length());
+        } else {
+            args.setLimit((int) Math.min(args.capacity(), total - position));
+
+            try {
+                int count = args.readFrom(channel);
+                position += count;
+            } catch (IOException e) {
+                e.printStackTrace();
+                return null;
+            }
         }
+        return args;
 
-        @Override
-        public void onCompleted(ioArgs args) {
-            //继续发送当前包，因为可能一个包没发完
-            sendCurrentPacket();
-        }
-    };
+        // args.startWriting();//将ioArgs缓冲区中的指针设置好
+        //
+        // if (position >= total) {
+        //     sendNextPacket();
+        //     return;
+        // } else if (position == 0) {
+        //     //首包，需要携带长度信息
+        //     args.writeLength(total);
+        // }
+        //
+        // byte[] bytes = packetTemp.bytes();
+        // //把bytes的数据写入到IoArgs中
+        // int count = args.readFrom(bytes, position);
+        // position += count;
+        //
+        // //完成封装
+        // args.finishWriting();//flip()操作
+        // //向通道注册OP_write，将Args附加到runnable中；selector线程监听到就绪即可触发线程池进行消息发送
+        //
+        // sender.setSendListener(this);
+        // return null;
+    }
 
+    @Override
+    public void onConsumeFailed(ioArgs args, Exception e) {
+        e.printStackTrace();
+    }
 
+    @Override
+    public void onConsumeCompleted(ioArgs args) {
+        sendCurrentPacket();
+    }
 }

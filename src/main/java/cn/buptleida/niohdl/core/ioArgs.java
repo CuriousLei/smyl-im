@@ -3,7 +3,9 @@ package cn.buptleida.niohdl.core;
 import java.io.EOFException;
 import java.io.IOException;
 import java.nio.ByteBuffer;
+import java.nio.channels.ReadableByteChannel;
 import java.nio.channels.SocketChannel;
+import java.nio.channels.WritableByteChannel;
 
 public class ioArgs {
     private int limit = 256;
@@ -30,27 +32,47 @@ public class ioArgs {
     /**
      * 从bytes中读到buffer
      *
-     * @param bytes
-     * @param offset
      * @return
      */
-    public int readFrom(byte[] bytes, int offset) {
-        int size = Math.min(bytes.length - offset, buffer.remaining());
-        buffer.put(bytes, offset, size);
-        return size;
+    public int readFrom(ReadableByteChannel channel) throws IOException {
+        // int size = Math.min(bytes.length - offset, buffer.remaining());
+        // buffer.put(bytes, offset, size);
+        // return size;
+        startWriting();
+
+        int byteProduced = 0;
+        //hasRemaining就是position<limit返回true
+        while (buffer.hasRemaining()) {
+            int len = channel.read(buffer);
+            if (len < 0) {
+                throw new EOFException();
+            }
+            byteProduced += len;
+        }
+
+        finishWriting();
+        return byteProduced;
     }
 
     /**
      * 从buffer中写数据入到bytes
      *
-     * @param bytes
-     * @param offset
      * @return
      */
-    public int writeTo(byte[] bytes, int offset) {
-        int size = Math.min(bytes.length - offset, buffer.remaining());
-        buffer.get(bytes, offset, size);
-        return size;
+    public int writeTo(WritableByteChannel channel) throws IOException {
+        // int size = Math.min(bytes.length - offset, buffer.remaining());
+        // buffer.get(bytes, offset, size);
+        // return size;
+        int byteProduced = 0;
+        while (buffer.hasRemaining()) {
+            int len = channel.write(buffer);
+            //System.out.println("发送长度"+len);
+            if (len < 0) {
+                throw new EOFException();
+            }
+            byteProduced += len;
+        }
+        return byteProduced;
     }
 
     public void startWriting() {
@@ -83,11 +105,8 @@ public class ioArgs {
             }
             byteProduced += len;
         }
-        //System.out.println("position="+buffer.position());
 
         finishWriting();
-
-        //System.out.println("收到长度："+byteProduced);
         return byteProduced;
     }
 
@@ -113,7 +132,9 @@ public class ioArgs {
     }
 
     public void writeLength(int total) {
+        startWriting();
         buffer.putInt(total);
+        finishWriting();
     }
 
     public int readLength(){
@@ -136,9 +157,23 @@ public class ioArgs {
         this.limit = limit;
     }
 
-    public interface IoArgsEventListener{
-        void onStarted(ioArgs args);
+    // public interface IoArgsEventListener{
+    //     void onStarted(ioArgs args);
+    //
+    //     void onCompleted(ioArgs args);
+    // }
 
-        void onCompleted(ioArgs args);
+    /**
+     * 消费状态的回调
+     */
+    public interface IoArgsEventProcessor{
+        /**
+         * 提供一份可消费的IoArgs
+         * @return
+         */
+        ioArgs providerIoArgs();
+
+        void onConsumeFailed(ioArgs args,Exception e);
+        void onConsumeCompleted(ioArgs args);
     }
 }
